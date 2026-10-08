@@ -59,8 +59,10 @@ python scripts/prepare_plot_data.py
 python scripts/make_figures.py
 ```
 
-With existing selected CSV/JSON tables, prepared NPZ files, and monthly OMNI
-inputs, the last two commands regenerate the figures without repeating CLEAN.
+With existing selected CSV/JSON tables, prepared NPZ files, and the full study's
+monthly OMNI inputs, the last two commands regenerate the figures without
+repeating CLEAN. The original OMNI cleaner computes global quartiles, so all
+study months are required even for a shorter GOES date range.
 Figure 1 requires the prepared June 16 and November 23, 2019 observations and
 their valid Telescope 2 sequences. All paths default to this repository.
 See [reproduction commands](docs/REPRODUCTION.md) for date limits and local paths.
@@ -73,7 +75,8 @@ See [reproduction commands](docs/REPRODUCTION.md) for date limits and local path
   available neighboring energies below 1,050 keV. The catalog counts detection
   windows; overlapping windows remain separate.
 - IMF clock angles are derived from median magnetic-field components over each
-  inclusive UTC detection window.
+  inclusive UTC detection window after applying the original OMNI cleaner,
+  including its global 10-IQR rule for `BZ_GSM`.
 
 The original Monte Carlo seeds were not recorded. The implementation uses
 reproducible per-window seeds with a default master seed of 2026; detections near

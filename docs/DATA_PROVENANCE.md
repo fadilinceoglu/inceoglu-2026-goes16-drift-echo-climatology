@@ -34,26 +34,29 @@ current paper's detection, selection, or plots. They are omitted. CLEAN retains
 the study's separate AR(1) residual-noise significance calculation.
 
 Monthly one-minute IMF observations come from the [NASA OMNI archive](https://cdaweb.gsfc.nasa.gov/pub/data/omni/omni_cdaweb/hro2_1min/).
-The reader consumes `Epoch`, `BX_GSE`, `BY_GSM`, and `BZ_GSM`. It masks declared
-CDF fill values, nonfinite values, and observations outside declared validity
-bounds. It preserves valid disturbances removed by the old generic IQR and
-fill-pattern cleaner. This is an explicit input correction; GOES fluxes,
-effective energies, and pitch-angle asset values are unchanged.
+The reader consumes raw `Epoch`, `BX_GSE`, `BY_GSM`, and `BZ_GSM` values. It
+concatenates all study months, trims to the original export's inclusive bounds
+of January 1, 2017 00:00 UTC through April 30, 2025 00:00 UTC, and applies the
+original scientific cleaner once to that complete series. Every study month is
+required even when preparing a catalog for a shorter selected-event interval,
+because the cleaner's quartiles come from the complete series.
 
-Against the original full export, metadata masking retains 247 valid `BZ_GSM`
-observations removed by its generic IQR filter. The other two components and
-all common finite values agree exactly. Inclusive window component medians,
-derived clock angles, and sample counts matched the original on all six verified
-cached days. A directly downloaded August 2019 monthly CDF also matched that
-month of the original export exactly.
+The cleaner masks nonfinite values and its original common fill patterns.
+`BX_GSE` and `BY_GSM` use bounds of -500 to +500 nT. Its case-sensitive `Bz_GSM`
+key does not match uppercase `BZ_GSM`, so that component receives the original
+global 10-IQR rule: values outside `Q1 - 10 × IQR` and `Q3 + 10 × IQR` are
+masked. For the original full export, the resulting bounds are -37.40 and
++37.15 nT. This restores the 247 exclusions made by the original cleaner.
+NASA quality flags and CDF `FILLVAL`, `VALIDMIN`, and `VALIDMAX` attributes are
+not applied to the IMF values. A directly downloaded August 2019 monthly CDF
+matched that month of the original export exactly.
 
 The plot catalog contains only valid selected channel rows. It retains
 overlapping windows and adds the clock angle derived after taking component
 medians, plus the number of OMNI timestamps in the window. The sample count
 remains zero when a component has no finite observations, as in the working
-code. The original export's inclusive bounds are January 1, 2017 00:00 UTC
-through April 30, 2025
-00:00 UTC; later padded window portions have no IMF samples beyond that cutoff.
+code. Later padded window portions have no IMF samples beyond the original
+export's April 30, 2025 00:00 UTC cutoff.
 
 ## Pitch-angle climatology
 

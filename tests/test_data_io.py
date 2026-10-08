@@ -101,16 +101,51 @@ class InputReaders(unittest.TestCase):
                               (date(2017, 4, 11), True), (date(2017, 4, 12), False)):
             self.assertEqual(data_io.uses_pitch_climatology(day), expected)
 
-    def test_omni_masks_declared_invalid_data_and_retains_valid_disturbances(self):
+    def test_omni_reads_raw_values_before_global_cleaning(self):
         result = data_io.read_omni_imf(self.omni())
-        expected = [-80, 99.99, np.nan, np.nan, np.nan, -100]
+        expected = [-80, 99.99, 9999.99, 101, np.nan, -100]
         for name in ("BX_GSE", "BY_GSM", "BZ_GSM"):
             np.testing.assert_allclose(result[name], expected, equal_nan=True)
         self.assertEqual(result["time"].iloc[0], datetime(2019, 6, 16))
+        cleaned = data_io.clean_omni_imf(result)
+        for name in ("BX_GSE", "BY_GSM", "BZ_GSM"):
+            np.testing.assert_allclose(cleaned[name], [-80, np.nan, np.nan, 101, np.nan, -100],
+                                       equal_nan=True)
 
-    def test_omni_requires_fill_metadata(self):
-        with self.assertRaisesRegex(ValueError, "FILLVAL"):
-            data_io.read_omni_imf(self.omni(include_fill=False))
+    def test_omni_uses_original_rules_without_fill_metadata(self):
+        with_attrs = data_io.clean_omni_imf(data_io.read_omni_imf(self.omni()))
+        without_attrs = data_io.clean_omni_imf(data_io.read_omni_imf(self.omni(include_fill=False)))
+        for name in ("BX_GSE", "BY_GSM", "BZ_GSM"):
+            np.testing.assert_array_equal(with_attrs[name], without_attrs[name])
+
+    def test_original_omni_bounds_fill_tolerances_and_case_sensitive_iqr(self):
+        import pandas as pd
+
+        tail = [-500., 500., -500.01, 500.01, -21., 21., -21.001, 21.001,
+                40., -40., 99.99, 100., 101., 9901., 9899., np.inf, np.nan]
+        values = np.r_[np.tile([-1., 1.], 128), tail]
+        frame = pd.DataFrame({name: values.copy() for name in ("BX_GSE", "BY_GSM", "BZ_GSM")})
+        result = data_io.clean_omni_imf(frame)
+        for name in ("BX_GSE", "BY_GSM"):
+            np.testing.assert_allclose(result[name].iloc[256:],
+                [-500., 500., np.nan, np.nan, -21., 21., -21.001, 21.001,
+                 40., -40., np.nan, np.nan, 101., np.nan, np.nan, np.nan, np.nan],
+                equal_nan=True)
+        np.testing.assert_allclose(result["BZ_GSM"].iloc[256:],
+            [np.nan, np.nan, np.nan, np.nan, -21., 21., np.nan, np.nan,
+             np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+            equal_nan=True)
+        np.testing.assert_array_equal(frame["BZ_GSM"], values)
+
+    def test_original_omni_iqr_requires_more_than_100_survivors_and_positive_spread(self):
+        import pandas as pd
+
+        for values, expected in ((np.r_[np.tile([-1., 1.], 49), 0., 80.], 80.),
+                                 (np.r_[np.tile([-1., 1.], 49), 0., 0., 80.], np.nan),
+                                 (np.r_[np.zeros(128), 80.], 80.)):
+            frame = pd.DataFrame({name: values for name in ("BX_GSE", "BY_GSM", "BZ_GSM")})
+            np.testing.assert_allclose(data_io.clean_omni_imf(frame)["BZ_GSM"].iloc[-1],
+                                       expected, equal_nan=True)
 
 
 if __name__ == "__main__":

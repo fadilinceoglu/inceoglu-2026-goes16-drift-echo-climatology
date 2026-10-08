@@ -103,13 +103,47 @@ def load_pitch_climatology(path=None):
     return arrays
 
 
-def read_omni_imf(path):
-    """Read one NASA OMNI CDF using each variable's declared validity metadata.
+OMNI_PHYSICAL_BOUNDS = {
+    "Bz_GSM": (-500, 500),
+    "BX_GSE": (-500, 500),
+    "BY_GSM": (-500, 500),
+}
+OMNI_FILL_PATTERNS = (
+    9999.99, 99999.9, 999999.0, 9999999.0,
+    -1e31, -1e30, -999.9, -9999.9, 99.99, 999.99,
+)
 
-    Monthly source files are kept intact. The conditioning stage will combine
-    them and apply the paper's time interval. No IQR filter or guessed common
-    fill-value list is applied to valid IMF observations.
+
+def clean_omni_imf(frame):
+    """Apply the original study's fill, physical-bound, and global IQR rules.
+
+    Call once after combining and clipping the full study's OMNI records.
+    The original case-sensitive Bz_GSM key is preserved: the BZ_GSM column
+    receives the 10-IQR fallback, while BX_GSE and BY_GSM use physical bounds.
     """
+    result = frame.copy()
+    for name in ("BX_GSE", "BY_GSM", "BZ_GSM"):
+        values = result[name].to_numpy(dtype=float)
+        valid = np.isfinite(values)
+        if name in OMNI_PHYSICAL_BOUNDS:
+            lo, hi = OMNI_PHYSICAL_BOUNDS[name]
+            valid &= (values >= lo) & (values <= hi)
+        for fill in OMNI_FILL_PATTERNS:
+            tolerance = abs(fill) * 0.01 if abs(fill) > 100 else 0.1
+            valid &= ~(np.abs(values - fill) < tolerance)
+        if name not in OMNI_PHYSICAL_BOUNDS:
+            surviving = values[valid]
+            if len(surviving) > 100:
+                q1, q3 = np.nanpercentile(surviving, [25, 75])
+                iqr = q3 - q1
+                if iqr > 0:
+                    valid &= (values >= q1 - 10 * iqr) & (values <= q3 + 10 * iqr)
+        result.loc[~valid, name] = np.nan
+    return result
+
+
+def read_omni_imf(path):
+    """Read unfiltered OMNI components; combine the study interval before cleaning."""
     import cdflib
     import pandas as pd
 
@@ -117,17 +151,7 @@ def read_omni_imf(path):
         result = {"time": cdflib.cdfepoch.to_datetime(cdf.varget("Epoch"))}
         for name in ("BX_GSE", "BY_GSM", "BZ_GSM"):
             values = np.array(cdf.varget(name), dtype=float, copy=True)
-            attrs = cdf.varattsget(name)
             if values.ndim != 1 or values.size != len(result["time"]):
                 raise ValueError("OMNI variable must match the Epoch grid: " + name)
-            if "FILLVAL" not in attrs:
-                raise ValueError("OMNI variable lacks FILLVAL metadata: " + name)
-            fill = float(np.asarray(attrs["FILLVAL"]).reshape(-1)[0])
-            valid = np.isfinite(values) & (values != fill)
-            if "VALIDMIN" in attrs:
-                valid &= values >= float(np.asarray(attrs["VALIDMIN"]).reshape(-1)[0])
-            if "VALIDMAX" in attrs:
-                valid &= values <= float(np.asarray(attrs["VALIDMAX"]).reshape(-1)[0])
-            values[~valid] = np.nan
             result[name] = values
     return pd.DataFrame(result)

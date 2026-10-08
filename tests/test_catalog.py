@@ -77,11 +77,14 @@ class IMFWindows(unittest.TestCase):
         with self.assertRaises(ValueError):
             catalog.window_imf_medians(windows, omni)
 
-    def test_window_months_include_padding_and_exact_study_cutoff(self):
+    def test_global_cleaning_needs_all_study_months_even_for_subset_windows(self):
         windows = pd.DataFrame({"date1_utc_echo": pd.to_datetime(["2019-06-30T22:00", "2025-04-30T00:00"]),
                                 "date2_utc_echo": pd.to_datetime(["2019-07-01T05:59", "2025-05-01T07:59"])})
-        self.assertEqual([day.isoformat() for day in catalog._needed_months(windows)],
-                         ["2019-06-01", "2019-07-01", "2025-04-01"])
+        months = catalog._needed_months(windows)
+        self.assertEqual(len(months), 100)
+        self.assertEqual(months[0].isoformat(), "2017-01-01")
+        self.assertEqual(months[-1].isoformat(), "2025-04-01")
+        self.assertEqual(catalog._needed_months(windows.iloc[:0]), [])
 
 
 class PlotCatalog(unittest.TestCase):
@@ -94,9 +97,10 @@ class PlotCatalog(unittest.TestCase):
         self.omni_dir.mkdir()
         self.source = self.selected_dir / "g16_d20190616.csv"
         self.output = self.root / "catalog.csv"
-        self.month = self.omni_dir / "omni_hro2_1min_20190601_v01.cdf"
-        self.month.write_text("trusted test source")
         self.frame = selected_day()
+        for month in catalog._needed_months(self.frame):
+            (self.omni_dir / ("omni_hro2_1min_" + month.strftime("%Y%m%d") + "_v01.cdf")).write_text("trusted test source")
+        self.month = self.omni_dir / "omni_hro2_1min_20190601_v01.cdf"
         self.metadata = {"complete_day": True, "units": {name: "minutes" for name in catalog.PERIOD_COLUMNS},
                          "amplitude_units": {"fedu": "electrons", "fpdu": "protons"}}
         classification.save_selected(self.source, self.frame, self.metadata)
@@ -105,8 +109,14 @@ class PlotCatalog(unittest.TestCase):
                           "--output", str(self.output)]
 
     def run_cli(self, arguments=None, omni=None):
+        def read_month(path):
+            if path.name.startswith("omni_hro2_1min_20190601_"):
+                return omni_day() if omni is None else omni
+            month = path.name.split("_")[3]
+            return omni_day(day=month[:4] + "-" + month[4:6] + "-01", periods=1)
+
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), patch.object(
-                catalog, "read_omni_imf", return_value=omni_day() if omni is None else omni):
+                catalog, "read_omni_imf", side_effect=read_month):
             return catalog.main(self.arguments if arguments is None else arguments, root=self.root)
 
     def test_real_core_round_trip_keeps_rows_events_and_small_schema(self):
@@ -119,7 +129,7 @@ class PlotCatalog(unittest.TestCase):
         self.assertTrue(result.imf_samples.eq(480).all())
         self.assertTrue(result.attrs["provenance"]["complete_detection_days"])
         self.assertEqual(result.attrs["provenance"]["rows"], 8)
-        self.assertEqual(len(result.attrs["provenance"]["omni_sources"]), 1)
+        self.assertEqual(len(result.attrs["provenance"]["omni_sources"]), 100)
         self.assertFalse(list(self.root.glob(".*.part")))
 
     def test_nonvalid_and_empty_inputs_keep_typed_empty_catalog_without_omni(self):
@@ -138,11 +148,23 @@ class PlotCatalog(unittest.TestCase):
         newer.write_text("latest")
         (self.omni_dir / "omni_hro2_1min_20190601_v2.cdf").write_text("older")
         with patch.object(catalog, "read_omni_imf", return_value=omni_day()) as reader:
-            _, sources = catalog._read_months(self.omni_dir, catalog._needed_months(self.frame))
+            _, sources = catalog._read_months(self.omni_dir, [pd.Timestamp("2019-06-01").date()])
         self.assertEqual(reader.call_args.args[0], newer)
         self.assertEqual(sources[0]["version"], 10)
+        (self.omni_dir / "omni_hro2_1min_20190701_v01.cdf").unlink()
         with self.assertRaisesRegex(FileNotFoundError, "2019-07-01"):
             catalog._read_months(self.omni_dir, [pd.Timestamp("2019-07-01").date()])
+
+    def test_iqr_is_applied_once_after_months_are_combined(self):
+        january = omni_day(day="2017-01-01", periods=129)
+        february = omni_day(day="2017-02-01", periods=128)
+        january["BZ_GSM"] = np.r_[np.tile([-1., 1.], 64), 40.]
+        february["BZ_GSM"] = np.tile([-50., 50.], 64)
+        self.assertTrue(np.isnan(catalog.clean_omni_imf(january)["BZ_GSM"].iloc[-1]))
+        with patch.object(catalog, "read_omni_imf", side_effect=[january, february]):
+            result, _ = catalog._read_months(self.omni_dir,
+                [pd.Timestamp("2017-01-01").date(), pd.Timestamp("2017-02-01").date()])
+        self.assertEqual(result["BZ_GSM"].iloc[128], 40.)
 
     def test_missing_or_invalid_sources_preserve_previous_catalog(self):
         self.assertEqual(self.run_cli(), 0)

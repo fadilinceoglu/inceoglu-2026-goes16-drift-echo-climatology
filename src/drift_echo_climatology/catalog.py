@@ -16,7 +16,7 @@ from .acquisition import PATTERNS, _date_argument, _sha256, month_starts
 from .classification import CANDIDATE_NAME, load_selected
 from .config import STUDY_START, STUDY_END
 from .detection import COLUMNS, _typed
-from .io import read_omni_imf
+from .io import clean_omni_imf, read_omni_imf
 from .selection import SELECTED_COLUMNS
 
 
@@ -28,12 +28,17 @@ STUDY_LAST = pd.Timestamp(STUDY_END)
 PERIOD_COLUMNS = ("max_echo_cand_per", "expected_drift_per", "est_drift_per_a0_adj", "est_drift_per_a90_adj")
 
 
-def _omni_arrays(frame):
+def _omni_times(frame):
     times = pd.to_datetime(frame["time"], errors="raise", utc=True).dt.tz_localize(None).to_numpy()
     ticks = times.astype("datetime64[ns]").astype("int64")
     if (pd.isna(times).any() or np.any(np.diff(ticks) <= 0)
             or np.any(ticks % (60 * 10 ** 9) != 0)):
         raise ValueError("OMNI timestamps must be unique, increasing UTC minutes")
+    return times
+
+
+def _omni_arrays(frame):
+    times = _omni_times(frame)
     values = [pd.to_numeric(frame[name], errors="raise").to_numpy(dtype=float) for name in IMF_COLUMNS]
     if any(np.isinf(array).any() for array in values):
         raise ValueError("OMNI components must contain finite values or masked NaNs")
@@ -144,12 +149,8 @@ def _selected_pair(path, allow_partial):
 
 
 def _needed_months(frame):
-    months = set()
-    for start, end in frame[["date1_utc_echo", "date2_utc_echo"]].drop_duplicates().itertuples(index=False, name=None):
-        first, last = max(pd.Timestamp(start), STUDY_FIRST), min(pd.Timestamp(end), STUDY_LAST)
-        if first <= last:
-            months.update(month_starts(first.date(), last.date()))
-    return sorted(months)
+    """The original global IQR filter needs the full study even for subset plots."""
+    return list(month_starts(STUDY_START, STUDY_END)) if len(frame) else []
 
 
 def _read_months(directory, months):
@@ -174,7 +175,7 @@ def _read_months(directory, months):
     for month in months:
         (source_version, _), path = available[month]
         frame = read_omni_imf(path)
-        times, _ = _omni_arrays(frame)
+        times = _omni_times(frame)
         next_month = pd.Timestamp(month) + pd.offsets.MonthBegin(1)
         if not len(frame) or np.any(times < np.datetime64(month)) or np.any(times >= next_month.to_datetime64()):
             raise ValueError("OMNI timestamps disagree with source month: " + path.name)
@@ -183,9 +184,9 @@ def _read_months(directory, months):
     combined = (pd.concat(frames, ignore_index=True) if frames
                 else pd.DataFrame({"time": pd.Series(dtype="datetime64[ns]"),
                                    **{name: pd.Series(dtype=float) for name in IMF_COLUMNS}}))
-    _omni_arrays(combined)
+    _omni_times(combined)
     combined = combined.loc[(combined["time"] >= STUDY_FIRST) & (combined["time"] <= STUDY_LAST)].reset_index(drop=True)
-    return combined, sources
+    return clean_omni_imf(combined), sources
 
 
 def _save_catalog(path, frame, metadata):
@@ -273,7 +274,7 @@ def main(argv=None, root=None):
                     "amplitude_units": amplitude_units, "implementation_sha256": digest.hexdigest(),
                     "dependencies": {name: version(name) for name in ("numpy", "pandas", "cdflib")},
                     "omni_interval_utc": [STUDY_FIRST.isoformat(), STUDY_LAST.isoformat()],
-                    "imf_masking": "variable FILLVAL/VALIDMIN/VALIDMAX; historical global BZ IQR exclusion is not applied",
+                    "imf_masking": "original finite/common-fill rules; BX_GSE and BY_GSM physical bounds; BZ_GSM 10-IQR filter over the full study interval",
                     "clock_angle": "mod(degrees(atan2(median BY_GSM, median BZ_GSM)), 360); all three IMF components require finite samples",
                     "event_definition": "selected valid UTC windows; overlapping windows remain separate"}
         _save_catalog(output, catalog, metadata)
