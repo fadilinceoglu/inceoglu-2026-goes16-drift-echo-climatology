@@ -1,0 +1,18 @@
+"""Shared study settings, preserving the working calculation."""
+
+from datetime import date
+
+STUDY_START = date(2017, 1, 1)
+STUDY_END = date(2025, 4, 30)
+PADDING_MINUTES = 480
+FILTER_ORDER = 5
+FILTER_MULTIPLIER = 1.25
+LSHELL = 6.6
+REST_ENERGY_KEV = {"fedu": 510.998950, "fpdu": 938272.089}
+DRIFT_CONSTANT_SECONDS = {"fedu": 1.557e4, "fpdu": 8.481}
+CLEAN_SIMULATIONS = 5000
+CLEAN_MAX_ITERATIONS = 50
+CLEAN_SIGNIFICANCE = 0.1
+CLEAN_FFT_LENGTH = 1440
+RANDOM_SEED = 2026
+WINDOW_MINUTES = {"fedu": 480, "fpdu": 240}
