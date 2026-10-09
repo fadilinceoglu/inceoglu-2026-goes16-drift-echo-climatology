@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "goes16-drift-echo-climatology"
 version = "0.1.0"
 description = "Calculations for the GOES-16 drift-echo climatology study"
+license = {file = "LICENSE"}
 requires-python = ">=3.9"
 dependencies = [
     "numpy==1.26.4",

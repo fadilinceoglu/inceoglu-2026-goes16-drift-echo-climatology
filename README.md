@@ -108,3 +108,8 @@ Inceoglu, F., Rodriguez, J. V., and Kress, B. T. (2026).
 *Drift Echoes at Geostationary Orbit: An Eight-Year Climatology from GOES-16*.
 
 Please cite the paper and this repository when using these calculations.
+
+## License
+
+The analysis code and original documentation are licensed under the
+[MIT License](LICENSE).
